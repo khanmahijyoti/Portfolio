@@ -2,7 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { gsap } from "gsap";
+import { Observer } from "gsap/Observer";
 import styles from "./page.module.css";
+
+gsap.registerPlugin(Observer);
 
 export default function Home() {
   const heroText = "Khan Mahi";
@@ -11,8 +15,10 @@ export default function Home() {
   const processStageRef = useRef<HTMLElement>(null);
   const [aboutRevealed, setAboutRevealed] = useState(false);
   const [processRevealed, setProcessRevealed] = useState(false);
+  const [processStep, setProcessStep] = useState(0);
   const aboutRevealedRef = useRef(false);
   const processRevealedRef = useRef(false);
+  const processStepRef = useRef(0);
 
   useEffect(() => {
     aboutRevealedRef.current = aboutRevealed;
@@ -23,6 +29,10 @@ export default function Home() {
   }, [processRevealed]);
 
   useEffect(() => {
+    processStepRef.current = processStep;
+  }, [processStep]);
+
+  useEffect(() => {
     const hero = heroRef.current;
     const aboutStage = aboutStageRef.current;
     const processStage = processStageRef.current;
@@ -31,18 +41,20 @@ export default function Home() {
       return;
     }
 
-    const WHEEL_TRIGGER_DELTA = 8;
     const SNAP_DOWN_DURATION = 820;
     const SNAP_UP_DURATION = 760;
     const SNAP_LOCK_DURATION = 920;
     const ABOUT_REVEAL_DELAY = 260;
     const PROCESS_REVEAL_DELAY = 260;
+    const STATE_CHANGE_LOCK_DURATION = 700;
 
     let lockTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let revealTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let intentLockTimeoutId: ReturnType<typeof setTimeout> | null = null;
     let snapFrameId = 0;
     let settleFrameId = 0;
     let scrollLocked = false;
+    let intentLocked = false;
 
     const getPanelTop = (element: HTMLElement) =>
       Math.round(window.scrollY + element.getBoundingClientRect().top);
@@ -56,8 +68,23 @@ export default function Home() {
         clearTimeout(revealTimeoutId);
         revealTimeoutId = null;
       }
+      if (intentLockTimeoutId) {
+        clearTimeout(intentLockTimeoutId);
+        intentLockTimeoutId = null;
+      }
       window.cancelAnimationFrame(snapFrameId);
       window.cancelAnimationFrame(settleFrameId);
+    };
+
+    const lockIntent = (duration = STATE_CHANGE_LOCK_DURATION) => {
+      intentLocked = true;
+      if (intentLockTimeoutId) {
+        clearTimeout(intentLockTimeoutId);
+      }
+      intentLockTimeoutId = setTimeout(() => {
+        intentLocked = false;
+        intentLockTimeoutId = null;
+      }, duration);
     };
 
     const settleToPanel = (element: HTMLElement, passes = 6) => {
@@ -155,21 +182,14 @@ export default function Home() {
       return 2;
     };
 
-    const onWheel = (event: WheelEvent) => {
-      if (scrollLocked) {
-        event.preventDefault();
+    const handleIntent = (goingDown: boolean) => {
+      if (scrollLocked || intentLocked) {
         return;
       }
 
-      if (Math.abs(event.deltaY) < WHEEL_TRIGGER_DELTA) {
-        return;
-      }
-
-      event.preventDefault();
       clearTimers();
 
       const panel = getActivePanel();
-      const goingDown = event.deltaY > 0;
 
       if (goingDown) {
         if (panel === 0) {
@@ -186,22 +206,43 @@ export default function Home() {
           aboutRevealedRef.current = false;
           setProcessRevealed(false);
           processRevealedRef.current = false;
+          setProcessStep(0);
+          processStepRef.current = 0;
           snapToPanel(processStage, SNAP_DOWN_DURATION, false, true);
+          return;
+        }
+
+        if (panel === 2 && processStepRef.current === 0) {
+          setProcessStep(1);
+          processStepRef.current = 1;
+          lockIntent();
           return;
         }
 
         return;
       }
 
+      if (panel === 2 && processStepRef.current === 1) {
+        setProcessStep(0);
+        processStepRef.current = 0;
+        lockIntent();
+        return;
+      }
+
       if (panel === 2 && processRevealedRef.current) {
         setProcessRevealed(false);
         processRevealedRef.current = false;
+        setProcessStep(0);
+        processStepRef.current = 0;
+        lockIntent();
         return;
       }
 
       if (panel === 2 && !processRevealedRef.current) {
         setAboutRevealed(false);
         aboutRevealedRef.current = false;
+        setProcessStep(0);
+        processStepRef.current = 0;
         snapToPanel(aboutStage, SNAP_UP_DURATION, true, false);
         return;
       }
@@ -209,6 +250,7 @@ export default function Home() {
       if (panel === 1 && aboutRevealedRef.current) {
         setAboutRevealed(false);
         aboutRevealedRef.current = false;
+        lockIntent();
         return;
       }
 
@@ -217,10 +259,17 @@ export default function Home() {
       }
     };
 
-    window.addEventListener("wheel", onWheel, { passive: false });
+    const observer = Observer.create({
+      target: window,
+      type: "wheel",
+      preventDefault: true,
+      tolerance: 12,
+      onDown: () => handleIntent(true),
+      onUp: () => handleIntent(false),
+    });
 
     return () => {
-      window.removeEventListener("wheel", onWheel);
+      observer.kill();
       clearTimers();
     };
   }, []);
@@ -333,8 +382,12 @@ export default function Home() {
         >
           <div className={styles.processWrap}>
             <h2 className={styles.processHeading}>
-              <p className={styles.processActive}>DEFINE</p>
-              <p className={styles.processMuted}>DESIGN</p>
+              <p className={processStep === 0 ? styles.processActive : styles.processMuted}>
+                DEFINE
+              </p>
+              <p className={processStep === 1 ? styles.processActive : styles.processMuted}>
+                DESIGN
+              </p>
               <p className={styles.processMuted}>DELIVER</p>
             </h2>
 
